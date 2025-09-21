@@ -117,8 +117,25 @@
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
     let stopCounter = 2;
-    let map = L.map('map').setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+    
+    // Initialize map with India bounds
+    const indiaBounds = [
+        [6.5546, 68.1114],  // Southwest (lat, lng)  
+        [35.6745, 97.3956]  // Northeast (lat, lng)
+    ];
+    
+    let map = L.map('map', {
+        maxBounds: indiaBounds,
+        maxBoundsViscosity: 1.0,  // prevents dragging outside
+        minZoom: 5,
+        maxZoom: 18
+    }).setView([20.5937, 78.9629], 5); // Center of India
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+        attribution: '© OpenStreetMap contributors',
+        bounds: indiaBounds  // Restrict tile loading to India bounds
+    }).addTo(map);
+    
     let markers = [], routeLine = null;
 
     function addStop() {

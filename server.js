@@ -48,15 +48,16 @@ const routeSchema = new mongoose.Schema({
 });
 
 const locationSchema = new mongoose.Schema({
-    driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver' },
-    lat: Number,
-    lng: Number,
+    driverId: { type: String, required: true }, // Change to String for easier tracking
+    lat: { type: Number, required: true },
+    lng: { type: Number, required: true },
     timestamp: { type: Date, default: Date.now }
 });
 
+const Location = mongoose.model('Location', locationSchema)
+
 const Driver = mongoose.model('Driver', driverSchema);
 const Route = mongoose.model('Route', routeSchema);
-const Location = mongoose.model('Location', locationSchema);
 
 // Socket.IO for real-time tracking
 io.on('connection', (socket) => {
@@ -233,10 +234,64 @@ app.post('/api/routes/:routeId/stops/:stopIndex/complete', async (req, res) => {
     }
 });
 
-// Get live locations
+/// Replace the existing location tracking parts in your server.js with these fixes:
+
+// Updated Location Schema (add this after your existing schemas)
+
+
+// Updated Socket.IO location handling
+io.on('connection', (socket) => {
+    console.log('Client connected:', socket.id);
+
+    // Driver sends location update
+    socket.on('location-update', async (data) => {
+        try {
+            const { driverId, lat, lng } = data;
+
+            console.log(`Received location update from driver ${driverId}:`, { lat, lng });
+
+            // Validate coordinates
+            if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+                console.error('Invalid coordinates received:', { lat, lng });
+                return;
+            }
+
+            // Save location to database
+            const location = new Location({
+                driverId: driverId.toString(),
+                lat: parseFloat(lat),
+                lng: parseFloat(lng)
+            });
+
+            await location.save();
+            console.log('Location saved to database');
+
+            // Update driver status
+            await Driver.findByIdAndUpdate(driverId, { isActive: true });
+
+            // Broadcast to all dispatcher dashboards
+            socket.broadcast.emit('driver-location', {
+                driverId,
+                lat: parseFloat(lat),
+                lng: parseFloat(lng),
+                timestamp: new Date()
+            });
+
+            console.log(`Location broadcasted for driver ${driverId}`);
+        } catch (error) {
+            console.error('Error updating location:', error);
+        }
+    });
+
+    // Rest of your socket handlers remain the same...
+});
+
+// Fixed API endpoint for getting live locations
 app.get('/api/locations', async (req, res) => {
     try {
-        // Get latest location for each driver
+        console.log('Fetching driver locations...');
+
+        // Method 1: Get latest location for each driver using aggregation
         const locations = await Location.aggregate([
             {
                 $sort: { timestamp: -1 }
@@ -248,12 +303,69 @@ app.get('/api/locations', async (req, res) => {
                     lng: { $first: '$lng' },
                     timestamp: { $first: '$timestamp' }
                 }
+            },
+            {
+                $match: {
+                    lat: { $exists: true, $ne: null },
+                    lng: { $exists: true, $ne: null }
+                }
             }
         ]);
 
+        console.log(`Found ${locations.length} driver locations`);
+
+        // Alternative Method 2: If aggregation doesn't work, use this simpler approach
+        // const uniqueDriverIds = await Location.distinct('driverId');
+        // const locations = [];
+        //
+        // for (const driverId of uniqueDriverIds) {
+        //     const latestLocation = await Location.findOne({ driverId })
+        //         .sort({ timestamp: -1 })
+        //         .lean();
+        //
+        //     if (latestLocation && latestLocation.lat && latestLocation.lng) {
+        //         locations.push({
+        //             _id: latestLocation.driverId,
+        //             lat: latestLocation.lat,
+        //             lng: latestLocation.lng,
+        //             timestamp: latestLocation.timestamp
+        //         });
+        //     }
+        // }
+
         res.json(locations);
     } catch (error) {
-        res.status(500).json({ error: 'Server Error' });
+        console.error('Error fetching locations:', error);
+        res.status(500).json({ error: 'Server Error', details: error.message });
+    }
+});
+
+// Add a test endpoint to manually add a location (for debugging)
+app.post('/api/test-location', async (req, res) => {
+    try {
+        const { driverId, lat, lng } = req.body;
+
+        const location = new Location({
+            driverId: driverId || 'test-driver',
+            lat: lat || 40.7128,
+            lng: lng || -74.0060
+        });
+
+        await location.save();
+
+        res.json({ success: true, location });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Add endpoint to get all locations for debugging
+app.get('/api/locations/all', async (req, res) => {
+    try {
+        const allLocations = await Location.find().sort({ timestamp: -1 }).limit(50);
+        res.json(allLocations);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
