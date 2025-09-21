@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dispatch Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+        }
+        .driver-online {
+            color: #28a745;
+        }
+        .driver-offline {
+            color: #dc3545;
+        }
+        .stop-completed {
+            text-decoration: line-through;
+            color: #6c757d;
+        }
+        .route-card {
+            margin-bottom: 1rem;
+        }
+        .status-badge {
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">🚛 Dispatch Central</a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="/create-route">Create Route</a>
+            <a class="nav-link" href="/drivers">Drivers</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row">
+        <!-- Live Map -->
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Live Driver Tracking</h5>
+                </div>
+                <div class="card-body">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Routes & Driver Status -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <h5>Active Routes</h5>
+                    <a href="/create-route" class="btn btn-sm btn-primary">+ New Route</a>
+                </div>
+                <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                    <% if (routes.length === 0) { %>
+                        <p class="text-muted">No routes created yet.</p>
+                    <% } else { %>
+                        <% routes.forEach(route => { %>
+                            <div class="card route-card">
+                                <div class="card-body p-3">
+                                    <h6 class="card-title d-flex justify-content-between">
+                                        <%= route.name %>
+                                        <span class="badge bg-<%= route.status === 'active' ? 'success' : 'secondary' %> status-badge">
+                                                <%= route.status %>
+                                            </span>
+                                    </h6>
+                                    <p class="card-text mb-2">
+                                        <strong>Driver:</strong>
+                                        <span class="<%= route.driver && route.driver.isActive ? 'driver-online' : 'driver-offline' %>">
+                                                <%= route.driver ? route.driver.name : 'Unassigned' %>
+                                            <%= route.driver && route.driver.isActive ? '🟢' : '🔴' %>
+                                            </span>
+                                    </p>
+                                    <p class="card-text small mb-2">
+                                        <strong>Stops:</strong> <%= route.stops.length %> |
+                                        <strong>Distance:</strong> <%= route.totalDistance %> |
+                                        <strong>ETA:</strong> <%= route.estimatedTime %>
+                                    </p>
+                                    <div class="stops-list">
+                                        <small class="text-muted">Progress:</small>
+                                        <% route.stops.forEach((stop, index) => { %>
+                                            <div class="small <%= stop.status === 'completed' ? 'stop-completed' : '' %>">
+                                                <%= index + 1 %>. <%= stop.address %>
+                                                <% if (stop.status === 'completed') { %>
+                                                    ✅
+                                                <% } %>
+                                            </div>
+                                        <% }); %>
+                                    </div>
+                                    <div class="mt-2">
+                                        <button class="btn btn-sm btn-outline-info" onclick="focusRoute('<%= route._id %>')">
+                                            View on Map
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        <% }); %>
+                    <% } %>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    // Initialize Socket.IO
+    const socket = io();
+
+    // Mock Google Maps (replace with actual Google Maps API)
+    let map;
+    let driverMarkers = {};
+    let routePolylines = {};
+
+    function initMap() {
+        // Create map centered on default location
+        map = {
+            center: { lat: 40.7128, lng: -74.0060 },
+            zoom: 12,
+            markers: {},
+            addMarker: function(id, lat, lng, title, color = 'red') {
+                console.log(`Adding marker: ${title} at ${lat}, ${lng}`);
+                // In real implementation, this would add a Google Maps marker
+                this.markers[id] = { lat, lng, title, color };
+            },
+            removeMarker: function(id) {
+                delete this.markers[id];
+            },
+            drawRoute: function(routeId, stops) {
+                console.log(`Drawing route ${routeId} with ${stops.length} stops`);
+                // In real implementation, this would draw polylines between stops
+            }
+        };
+
+        console.log('Map initialized (mock)');
+        loadInitialData();
+    }
+
+    // Load initial routes and driver locations
+    async function loadInitialData() {
+        try {
+            // Load current driver locations
+            const response = await fetch('/api/locations');
+            const locations = await response.json();
+
+            locations.forEach(location => {
+                updateDriverMarker(location._id, location.lat, location.lng);
+            });
+
+            // Draw routes on map
+            <% routes.forEach(route => { %>
+            <% if (route.stops && route.stops.length > 0) { %>
+            const stops<%= route._id %> = [
+                <% route.stops.forEach(stop => { %>
+                { lat: <%= stop.lat %>, lng: <%= stop.lng %>, address: '<%= stop.address %>' },
+                <% }); %>
+            ];
+            map.drawRoute('<%= route._id %>', stops<%= route._id %>);
+            <% } %>
+            <% }); %>
+        } catch (error) {
+            console.error('Error loading initial data:', error);
+        }
+    }
+
+    // Real-time location updates
+    socket.on('driver-location', (data) => {
+        updateDriverMarker(data.driverId, data.lat, data.lng);
+        updateDriverStatus(data.driverId, true);
+    });
+
+    // Real-time stop updates
+    socket.on('stop-update', (data) => {
+        updateStopStatus(data.routeId, data.stopIndex, data.status);
+    });
+
+    function updateDriverMarker(driverId, lat, lng) {
+        map.addMarker(`driver-${driverId}`, lat, lng, 'Driver Location', 'blue');
+        console.log(`Driver ${driverId} location updated: ${lat}, ${lng}`);
+    }
+
+    function updateDriverStatus(driverId, isOnline) {
+        const statusElements = document.querySelectorAll(`[data-driver-id="${driverId}"]`);
+        statusElements.forEach(element => {
+            element.className = isOnline ? 'driver-online' : 'driver-offline';
+            element.innerHTML = element.innerHTML.replace(/🟢|🔴/, isOnline ? '🟢' : '🔴');
+        });
+    }
+
+    function updateStopStatus(routeId, stopIndex, status) {
+        // Update the UI to show completed stops
+        location.reload(); // Simple reload for now, could be more sophisticated
+    }
+
+    function focusRoute(routeId) {
+        console.log(`Focusing on route: ${routeId}`);
+        // In real implementation, this would center map on route
+        alert(`Focusing on route: ${routeId}`);
+    }
+
+    // Auto-refresh every 30 seconds
+    setInterval(() => {
+        loadInitialData();
+    }, 30000);
+
+    // Initialize map when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        initMap();
+    });
+</script>
+
+<script>
+    let map;
+    let driverMarkers = {};
+    let routePolylines = {};
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize map
+        map = L.map('map').setView([20.5937, 78.9629], 5); // Centered on India
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        loadInitialData();
+
+        // Refresh every 30 seconds
+        setInterval(loadInitialData, 30000);
+    });
+
+    // Load driver locations and routes
+    async function loadInitialData() {
+        try {
+            // Fetch driver locations
+            const res = await fetch('/api/locations');
+            const locations = await res.json();
+
+            locations.forEach(driver => {
+                const id = driver._id;
+                const lat = driver.lat;
+                const lng = driver.lng;
+
+                if (driverMarkers[id]) {
+                    driverMarkers[id].setLatLng([lat, lng]);
+                } else {
+                    driverMarkers[id] = L.marker([lat, lng], {title: driver.name}).addTo(map).bindPopup(driver.name);
+                }
+            });
+
+            // Draw routes
+            <% routes.forEach(route => { %>
+            <% if (route.stops && route.stops.length > 0) { %>
+            const stops<%= route._id %> = [
+                <% route.stops.forEach(stop => { %>
+                { lat: <%= stop.lat %>, lng: <%= stop.lng %>, status: '<%= stop.status %>', address: '<%= stop.address %>' },
+                <% }); %>
+            ];
+
+            const coords = stops<%= route._id %>.map(s => [s.lat, s.lng]);
+
+            if (routePolylines['<%= route._id %>']) {
+                routePolylines['<%= route._id %>'].setLatLngs(coords);
+            } else {
+                routePolylines['<%= route._id %>'] = L.polyline(coords, { color: 'blue', weight: 4 }).addTo(map);
+            }
+
+            // Optional: change marker icon/color for completed stops
+            stops<%= route._id %>.forEach(s => {
+                const icon = s.status === 'completed' ? L.icon({iconUrl: 'https://cdn-icons-png.flaticon.com/512/190/190411.png', iconSize: [20, 20]}) : undefined;
+                L.marker([s.lat, s.lng], {icon}).addTo(map).bindPopup(s.address);
+            });
+            <% } %>
+            <% }); %>
+
+        } catch (err) {
+            console.error('Error loading map data:', err);
+        }
+    }
+
+    // Optional: focus map on route
+    function focusRoute(routeId) {
+        const polyline = routePolylines[routeId];
+        if (polyline) map.fitBounds(polyline.getBounds());
+    }
+</script>
+<script>
+    // Mock map display
+    document.addEventListener('DOMContentLoaded', function() {
+        const mapDiv = document.getElementById('map');
+        mapDiv.innerHTML = `
+                <div class="d-flex align-items-center justify-content-center h-100 bg-light">
+                    <div class="text-center">
+                        <h5>Live Map View</h5>
+                        <p class="text-muted">Replace this with Google Maps API</p>
+                        <p>Driver markers and routes will appear here</p>
+                        <div class="mt-3">
+                            <span class="badge bg-primary me-2">🔵 Active Drivers</span>
+                            <span class="badge bg-success">🟢 Completed Stops</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+    });
+</script>
+</body>
+</html>
